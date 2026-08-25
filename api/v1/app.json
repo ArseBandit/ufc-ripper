@@ -1,14 +1,18 @@
 {
   "latest": {
-    "version": "4.1.0",
+    "version": "4.2.0",
     "changes": [
-      "Fixed errors when logging in",
-      "Fixed errors when fetching VOD formats",
-      "Added support for specifying a custom user agent and API version in the config file",
-      "Updated text in configuration for better clarity"
+      "Use the new manifest API from Fight Pass for everything (Faster and better VOD availability)",
+      "Fixed issues where some VODs were region-blocked and not allowed to download",
+      "Added support for re-downloading third-party media tools",
+      "Added support for exporting and importing the logged-in Fight Pass session",
+      "Added support for retaining the search query after starting a download. Users can now change the behavior in configuration",
+      "Saved credentials now correctly autofill in the Fight Pass login email and password inputs",
+      "Fixed an issue where the saved credential email appears in the search input",
+      "New changes in an update will now be shown in the update prompt"
     ],
     "release": {
-      "url": "https://github.com/m4heshd/ufc-ripper/releases/tag/v4.1.0"
+      "url": "https://github.com/m4heshd/ufc-ripper/releases/tag/v4.2.0"
     }
   }
 }

@@ -72,11 +72,10 @@ static HTTP_PROXIED_CLIENT: Lazy<ArcSwap<Client>> = Lazy::new(|| {
 static VOD_SEARCH_PARAMS: Lazy<String> = Lazy::new(|| {
     form_urlencoded::Serializer::new(String::new())
         .append_pair("facetFilters", r#"["type:VOD_VIDEO"]"#)
-        .append_pair("hitsPerPage", "12")
         .append_pair("advancedSyntax", "true")
         .append_pair(
             "attributesToRetrieve",
-            r#"["id","description","thumbnailUrl","duration"]"#,
+            r#"["id","name","description","thumbnailUrl","duration","publishedDate"]"#,
         )
         .finish()
 });
@@ -332,8 +331,9 @@ pub async fn login_to_fight_pass(
     email: &str,
     pass: &str,
 ) -> anyhow::Result<LoginSession> {
+    let proxied = HTTP_PROXIED_CLIENT.load();
     let client = if get_config().use_proxy {
-        &HTTP_PROXIED_CLIENT.load()
+        &**proxied
     } else {
         &*HTTP_CLIENT
     };
@@ -390,8 +390,9 @@ pub async fn refresh_access_token() -> anyhow::Result<()> {
         println!("Refreshing access token..\n");
     }
 
+    let proxied = HTTP_PROXIED_CLIENT.load();
     let client = if get_config().use_proxy {
-        &HTTP_PROXIED_CLIENT.load()
+        &**proxied
     } else {
         &*HTTP_CLIENT
     };
@@ -446,8 +447,23 @@ pub async fn refresh_access_token() -> anyhow::Result<()> {
 
 /// Searches the UFC Fight Pass library for VODs.
 pub async fn search_vods(query: &str, page: u64) -> anyhow::Result<JSON> {
+    search_vods_with_options(query, page, 12, get_config().search_title_only).await
+}
+
+/// Searches by title with a larger page size for replay followers.
+pub async fn search_replay_vods(query: &str, page: u64) -> anyhow::Result<JSON> {
+    search_vods_with_options(query, page, 100, true).await
+}
+
+async fn search_vods_with_options(
+    query: &str,
+    page: u64,
+    hits_per_page: u16,
+    title_only: bool,
+) -> anyhow::Result<JSON> {
+    let proxied = HTTP_PROXIED_CLIENT.load();
     let client = if get_config().use_proxy {
-        &HTTP_PROXIED_CLIENT.load()
+        &**proxied
     } else {
         &*HTTP_CLIENT
     };
@@ -459,13 +475,10 @@ pub async fn search_vods(query: &str, page: u64) -> anyhow::Result<JSON> {
         form_urlencoded::Serializer::new(String::new())
             .append_pair("query", query)
             .append_pair("page", &page.to_string())
+            .append_pair("hitsPerPage", &hits_per_page.to_string())
             .append_pair(
                 "restrictSearchableAttributes",
-                if get_config().search_title_only {
-                    r#"["name"]"#
-                } else {
-                    "[]"
-                }
+                if title_only { r#"["name"]"# } else { "[]" }
             )
             .finish()
     );
@@ -536,8 +549,9 @@ pub async fn get_vod_manifest(vod_id: u64, streams: bool) -> anyhow::Result<Vod>
     // Runs the manifest request and returns the status of that request.
     // Having this as a closure allows this process to be run multiple times.
     let run_request = || async {
+        let proxied = HTTP_PROXIED_CLIENT.load();
         let client = if get_config().use_proxy {
-            &HTTP_PROXIED_CLIENT.load()
+            &**proxied
         } else {
             &*HTTP_CLIENT
         };

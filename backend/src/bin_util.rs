@@ -172,15 +172,13 @@ where
             .lines();
 
             let stderr_task = async {
-                if let Some(line) = yt_dlp_stderr.next_line().await? {
-                    if let Some(error) = process_yt_dlp_stderr(&line) {
-                        return Err(anyhow!(error.to_string()));
+                while let Some(line) = yt_dlp_stderr.next_line().await? {
+                    if let Some(error) = fatal_yt_dlp_stderr(&line) {
+                        return Err(error.context(
+                            "Download process failed with an error. \
+                            Check the browser console for more information",
+                        ));
                     }
-
-                    return Err(anyhow!(line).context(
-                        "Download process failed with an error. \
-                        Check the browser console for more information",
-                    ));
                 }
 
                 Ok::<(), anyhow::Error>(())
@@ -203,7 +201,12 @@ where
                 Ok::<(), anyhow::Error>(())
             };
 
-            tokio::try_join!(stderr_task, stdout_task)
+            tokio::try_join!(stderr_task, stdout_task)?;
+            let status = yt_dlp.wait().await.context("Failed to wait for yt-dlp")?;
+            if !status.success() {
+                anyhow::bail!("yt-dlp exited with status {status}");
+            }
+            Ok::<(), anyhow::Error>(())
         }
     };
 
@@ -299,15 +302,13 @@ pub async fn get_vod_formats(hls: &str) -> anyhow::Result<JSON> {
     .lines();
 
     let stderr_task = async {
-        if let Some(line) = yt_dlp_stderr.next_line().await? {
-            if let Some(error) = process_yt_dlp_stderr(&line) {
-                return Err(anyhow!(error.to_string()));
+        while let Some(line) = yt_dlp_stderr.next_line().await? {
+            if let Some(error) = fatal_yt_dlp_stderr(&line) {
+                return Err(error.context(
+                    "Formats query request failed with an error. \
+                    Check the browser console for more information",
+                ));
             }
-
-            return Err(anyhow!(line).context(
-                "Formats query request failed with an error. \
-                Check the browser console for more information",
-            ));
         }
 
         Ok::<(), anyhow::Error>(())
@@ -339,6 +340,30 @@ pub async fn get_vod_formats(hls: &str) -> anyhow::Result<JSON> {
             }
         }
         Err(error) => Err(error),
+    }
+}
+
+/// yt-dlp also writes blank and informational lines to stderr. Its exit status
+/// remains the final authority for an otherwise unrecognized failure.
+fn fatal_yt_dlp_stderr(line: &str) -> Option<anyhow::Error> {
+    let line = line.trim();
+    if let Some(message) = process_yt_dlp_stderr(line) {
+        return Some(anyhow!(message.to_owned()));
+    }
+    line.starts_with("ERROR:").then(|| anyhow!(line.to_owned()))
+}
+
+#[cfg(test)]
+mod stderr_tests {
+    use super::fatal_yt_dlp_stderr;
+
+    #[test]
+    fn ignores_progress_and_blank_lines_but_reports_real_errors() {
+        assert!(fatal_yt_dlp_stderr("\n").is_none());
+        assert!(fatal_yt_dlp_stderr("WARNING: retrying fragment").is_none());
+        assert!(fatal_yt_dlp_stderr("[download] 50%").is_none());
+        assert!(fatal_yt_dlp_stderr("ERROR: HTTP Error 403: Forbidden").is_some());
+        assert!(fatal_yt_dlp_stderr("unable to create directory").is_some());
     }
 }
 
@@ -462,7 +487,9 @@ pub fn generate_vod_download_config(
 
     if *use_temp_path {
         if temp_path.eq("temp:") {
-            log_warn!(r#"You have "Use temporary path" enabled for downloads but the path is empty. Consider setting a proper temporary path"#);
+            log_warn!(
+                r#"You have "Use temporary path" enabled for downloads but the path is empty. Consider setting a proper temporary path"#
+            );
         } else {
             arg_setup.extend(["--paths", &temp_path]);
         }

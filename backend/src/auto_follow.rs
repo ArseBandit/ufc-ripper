@@ -36,6 +36,7 @@ struct FollowState {
     fight_night_latest_event: String,
     ufc_initialized_number: u16,
     highest_ufc_number: u16,
+    ufc_baseline_ts: String,
     bjj_initialized_number: u16,
     highest_bjj_number: u16,
 }
@@ -104,14 +105,26 @@ async fn poll(
         return Ok(());
     }
     if ufc > 0 {
-        {
+        let (is_new_selection, baseline_empty) = {
+            let s = state.lock().unwrap();
+            (
+                s.ufc_initialized_number != ufc,
+                s.ufc_baseline_ts.is_empty(),
+            )
+        };
+        if is_new_selection {
             let mut s = state.lock().unwrap();
-            if s.ufc_initialized_number != ufc {
-                s.highest_ufc_number = ufc.saturating_sub(1);
-            }
+            s.highest_ufc_number = ufc.saturating_sub(1);
+        }
+        // Record the first-check publication watermark before searching so that
+        // existing recordings for later numbers are skipped when they are
+        // discovered on later checks.
+        if ufc_take_baseline(include_existing, is_new_selection, baseline_empty) {
+            let mut s = state.lock().unwrap();
+            s.ufc_baseline_ts = now_utc_iso();
+            save_state(path, &s)?;
         }
         let highest = state.lock().unwrap().highest_ufc_number.max(ufc);
-        let initial = state.lock().unwrap().ufc_initialized_number != ufc;
         let mut batches = Vec::new();
         for number in highest.saturating_sub(2).max(ufc)..=highest.saturating_add(1) {
             let items = search_replays(&format!("\"UFC {number}\""), |n, d| {
@@ -120,7 +133,7 @@ async fn poll(
             .await?;
             batches.push((number, items));
         }
-        if initial && !include_existing {
+        if is_new_selection && !include_existing {
             let mut s = state.lock().unwrap();
             for (number, items) in &batches {
                 s.handled_ids.extend(items.iter().map(|i| i.id));
@@ -146,6 +159,17 @@ async fn poll(
                     let config = get_config();
                     if !config.auto_follow_replays || config.auto_follow_ufc_number != ufc {
                         return Ok(());
+                    }
+                    let allowed = {
+                        let s = state.lock().unwrap();
+                        numbered_replay_allowed(
+                            include_existing,
+                            &s.ufc_baseline_ts,
+                            &item.published,
+                        )
+                    };
+                    if !allowed {
+                        continue;
                     }
                     if queue_one(state, path, item).await? {
                         return Ok(());
@@ -596,6 +620,65 @@ fn classify_fight_night(name: &str, duration: u64) -> bool {
     }
 }
 
+/// Whether the selected numbered-UFC event should record a first-check
+/// publication watermark: when Include-available is off and this is a new
+/// selection or a legacy state with no watermark yet.
+fn ufc_take_baseline(include_existing: bool, is_new_selection: bool, baseline_empty: bool) -> bool {
+    !include_existing && (is_new_selection || baseline_empty)
+}
+
+/// Whether a numbered-UFC replay may be queued. With Include-available off and a
+/// watermark set, only publications strictly after the watermark qualify;
+/// missing or malformed dates are treated as pre-existing so old content is
+/// never backfilled.
+fn numbered_replay_allowed(include_existing: bool, baseline: &str, published: &str) -> bool {
+    if include_existing || baseline.is_empty() {
+        return true;
+    }
+    has_iso_date(published) && published > baseline
+}
+
+/// True when `value` begins with an ISO-8601 UTC date (`YYYY-MM-DD`).
+fn has_iso_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 10
+        && bytes[0..4].iter().all(u8::is_ascii_digit)
+        && bytes[4] == b'-'
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[7] == b'-'
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
+}
+
+/// Current UTC time as an ISO-8601 string, used as the numbered-UFC watermark.
+fn now_utc_iso() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs() as i64);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
+}
+
+/// Converts days since the Unix epoch to a civil `(year, month, day)`.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if month <= 2 { year + 1 } else { year }, month, day)
+}
+
 async fn queue_one(
     state: &Arc<Mutex<FollowState>>,
     path: &std::path::Path,
@@ -689,9 +772,10 @@ fn save_state(path: &std::path::Path, state: &FollowState) -> anyhow::Result<()>
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_bjj, classify_contender, classify_fight_night, classify_ufc, existing_media,
-        fight_night_event_key_any, fight_night_key, latest_year, save_state,
-        select_fight_night_keys, FollowState,
+        civil_from_days, classify_bjj, classify_contender, classify_fight_night, classify_ufc,
+        existing_media, fight_night_event_key_any, fight_night_key, has_iso_date, latest_year,
+        now_utc_iso, numbered_replay_allowed, save_state, select_fight_night_keys,
+        ufc_take_baseline, FollowState,
     };
     use serde_json::json;
     use std::collections::HashMap;
@@ -957,5 +1041,74 @@ mod tests {
         keys.insert("c".to_string(), String::new());
         assert_eq!(latest_year(&keys), Some(2026));
         assert_eq!(latest_year(&HashMap::new()), None);
+    }
+
+    #[test]
+    fn numbered_ufc_watermark_skips_old_and_queues_new() {
+        let baseline = "2026-09-24T21:00:00Z";
+        // Selecting 320 and later discovering 322-331: their publications
+        // predate the watermark and must be skipped, not downloaded.
+        assert!(!numbered_replay_allowed(
+            false,
+            baseline,
+            "2026-01-05T00:00:00Z"
+        ));
+        assert!(!numbered_replay_allowed(
+            false,
+            baseline,
+            "2024-11-30T12:00:00.000Z"
+        ));
+        // A genuinely new publication after the watermark is eligible.
+        assert!(numbered_replay_allowed(
+            false,
+            baseline,
+            "2026-09-25T02:11:00.000Z"
+        ));
+        assert!(numbered_replay_allowed(
+            false,
+            baseline,
+            "2026-09-24T21:00:01Z"
+        ));
+        // Missing or malformed dates are treated conservatively as pre-existing.
+        assert!(!numbered_replay_allowed(false, baseline, ""));
+        assert!(!numbered_replay_allowed(false, baseline, "not-a-date"));
+        assert!(!numbered_replay_allowed(
+            false,
+            baseline,
+            "2026-9-1T00:00:00Z"
+        ));
+        // Include-available ON preserves backfill of existing recordings.
+        assert!(numbered_replay_allowed(
+            true,
+            baseline,
+            "2020-01-01T00:00:00Z"
+        ));
+        assert!(numbered_replay_allowed(true, "", "2020-01-01T00:00:00Z"));
+        // No watermark yet: the first check is baselined separately, so allow.
+        assert!(numbered_replay_allowed(false, "", "2020-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn ufc_watermark_taken_for_new_selection_and_legacy_only() {
+        // New selection, Include-available off -> record the watermark.
+        assert!(ufc_take_baseline(false, true, false));
+        // Legacy state (same number, no watermark) -> record so old numbers are skipped.
+        assert!(ufc_take_baseline(false, false, true));
+        // Already baselined and number unchanged -> keep the existing watermark.
+        assert!(!ufc_take_baseline(false, false, false));
+        // Include-available on -> never take a watermark (preserve backfill).
+        assert!(!ufc_take_baseline(true, true, true));
+        assert!(!ufc_take_baseline(true, false, true));
+    }
+
+    #[test]
+    fn now_utc_iso_is_well_formed() {
+        let now = now_utc_iso();
+        assert_eq!(now.len(), 20);
+        assert!(has_iso_date(&now));
+        assert!(now.ends_with('Z'));
+        // Epoch-day conversion sanity checks.
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(10_957), (2000, 1, 1));
     }
 }

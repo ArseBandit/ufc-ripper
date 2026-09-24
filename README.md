@@ -235,6 +235,8 @@ Pass. You choose how much of your data quota you'll be burning to watch a video.
 
 In **Configuration → Follow full replays**, enable the opt-in follower and select numbered UFC events, UFC BJJ events, UFC Fight Nights, or Dana White's Contender Series. Existing listings are baselined by default; **Include available replays on first check** opts into downloading eligible recordings already listed (including the most recent Fight Night). Completed and skipped titles are recorded in `config/auto_follow_state.json` to prevent duplicate downloads.
 
+For numbered UFC events, the first check records a publication timestamp for the selected number; with **Include available replays on first check** off, only replays published after that timestamp are downloaded. Existing recordings for later numbers are skipped even when they are discovered on a later check, and missing or malformed publication dates are treated as pre-existing. Changing the selected number starts a new baseline, and **Include available replays on first check** still backfills what is already available.
+
 Fight Night discovery is two-stage: a bounded broad search (up to 1,000 results; a warning is logged when exceeded) collects event names from full replays and individual bouts, then the newest events are deep-searched for their full main card, Prelims, and Early/Fight Pass Prelims. Events older than the last-seen baseline are not re-searched, so new Fight Night replays are found even though the backend ranks older events first.
 
 ### Concurrent multi-fragment downloads

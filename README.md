@@ -226,6 +226,18 @@ UFC Ripper can stream videos directly, right from the search results. The advant
 you're the one in control. You can force the player to stream the video in your preferred settings, unlike the UFC Fight
 Pass. You choose how much of your data quota you'll be burning to watch a video.
 
+### Follow full replays automatically
+
+In **Configuration → Follow full replays**, enable **Automatically follow replays**, then choose one or both:
+
+- **Next numbered UFC event**: enter the number you want to start following (for example, `321`). The follower looks for a full main card, Prelims, and Fight Pass Prelims for that event and subsequent numbered events. Set `0` to turn off numbered events. It does not currently follow UFC Fight Night cards.
+- **Next UFC BJJ event**: enter the BJJ event number you want to follow (for example, `9`). Full event replays are selected by their `UFC BJJ N: Name vs Name` titles and duration. Set `0` to turn off BJJ events.
+- **Dana White's Contender Series**: follow complete `Season X, Week Y` episodes. Individual bouts and highlights are excluded.
+
+The first check runs on startup or within 30 minutes of changing settings. By default, recordings already listed on the first check are marked as seen; new listings are downloaded as they appear. Select **Include available replays on first check** before enabling the follower to download already available segments of the chosen numbered UFC and BJJ events and the most recent Contender Series episode. Older Contender Series episodes are marked as seen even in this mode. Changing a selected event number starts a new baseline for that number.
+
+The follower uses the normal Fight Pass login, entitlement check, download quality and download folder. It waits for manual downloads, queues one replay at a time, retries failed downloads on a later check, and records completed or skipped titles in `config/auto_follow_state.json` so restarts do not download them again. This state file contains title and catalogue ID information, not account credentials. Replays may appear some time after an event and availability differs by region and subscription. A completed recording in the configured download folder is skipped if its filename matches the title, with or without the app's numeric prefix. Do not delete the state file unless you intend to reset what the follower considers seen.
+
 ### Concurrent multi-fragment downloads
 
 UFC Fight Pass streams are very heavily limited to slower bandwidths. But these streams are broken down into little

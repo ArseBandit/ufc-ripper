@@ -69,7 +69,13 @@ ENV RUN_ENV=container
 
 # Setup app
 COPY --from=builder /ufcr/package/linux/ .
-RUN chmod +x ./ufc-ripper
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /ufcr/bin \
+    && ln -sfn /usr/bin/ffmpeg /ufcr/bin/ffmpeg \
+    && ln -sfn /usr/bin/ffprobe /ufcr/bin/ffprobe \
+    && chmod +x ./ufc-ripper
 
 # Ports
 EXPOSE 8383
@@ -80,4 +86,3 @@ VOLUME ["/downloads"]
 
 # Start
 CMD ["./ufc-ripper"]
-

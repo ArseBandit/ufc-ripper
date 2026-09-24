@@ -36,6 +36,7 @@ struct FollowState {
     fight_night_latest_event: String,
     ufc_initialized_number: u16,
     highest_ufc_number: u16,
+    ufc_baseline_number: u16,
     ufc_baseline_ts: String,
     bjj_initialized_number: u16,
     highest_bjj_number: u16,
@@ -105,12 +106,9 @@ async fn poll(
         return Ok(());
     }
     if ufc > 0 {
-        let (is_new_selection, baseline_empty) = {
+        let (is_new_selection, baseline_number) = {
             let s = state.lock().unwrap();
-            (
-                s.ufc_initialized_number != ufc,
-                s.ufc_baseline_ts.is_empty(),
-            )
+            (s.ufc_initialized_number != ufc, s.ufc_baseline_number)
         };
         if is_new_selection {
             let mut s = state.lock().unwrap();
@@ -118,10 +116,12 @@ async fn poll(
         }
         // Record the first-check publication watermark before searching so that
         // existing recordings for later numbers are skipped when they are
-        // discovered on later checks.
-        if ufc_take_baseline(include_existing, is_new_selection, baseline_empty) {
+        // discovered on later checks. The paired baseline number keeps the
+        // stamp stable across retries when a first search fails.
+        if ufc_take_baseline(include_existing, baseline_number, ufc) {
             let mut s = state.lock().unwrap();
             s.ufc_baseline_ts = now_utc_iso();
+            s.ufc_baseline_number = ufc;
             save_state(path, &s)?;
         }
         let highest = state.lock().unwrap().highest_ufc_number.max(ufc);
@@ -620,11 +620,14 @@ fn classify_fight_night(name: &str, duration: u64) -> bool {
     }
 }
 
-/// Whether the selected numbered-UFC event should record a first-check
-/// publication watermark: when Include-available is off and this is a new
-/// selection or a legacy state with no watermark yet.
-fn ufc_take_baseline(include_existing: bool, is_new_selection: bool, baseline_empty: bool) -> bool {
-    !include_existing && (is_new_selection || baseline_empty)
+/// Whether the selected numbered-UFC event should (re)record its first-check
+/// publication watermark: when Include-available is off and the stored baseline
+/// number does not match the selected number. Because the baseline number is
+/// persisted together with the timestamp, a retry after a failed first search
+/// keeps the original watermark instead of moving it forward, and changing the
+/// selected number re-baselines exactly once.
+fn ufc_take_baseline(include_existing: bool, baseline_number: u16, selected: u16) -> bool {
+    !include_existing && baseline_number != selected
 }
 
 /// Whether a numbered-UFC replay may be queued. With Include-available off and a
@@ -1089,16 +1092,33 @@ mod tests {
     }
 
     #[test]
-    fn ufc_watermark_taken_for_new_selection_and_legacy_only() {
-        // New selection, Include-available off -> record the watermark.
-        assert!(ufc_take_baseline(false, true, false));
-        // Legacy state (same number, no watermark) -> record so old numbers are skipped.
-        assert!(ufc_take_baseline(false, false, true));
-        // Already baselined and number unchanged -> keep the existing watermark.
-        assert!(!ufc_take_baseline(false, false, false));
-        // Include-available on -> never take a watermark (preserve backfill).
-        assert!(!ufc_take_baseline(true, true, true));
-        assert!(!ufc_take_baseline(true, false, true));
+    fn ufc_watermark_stamped_once_per_number() {
+        // New selection (no baseline yet) and legacy state, Include-available off.
+        assert!(ufc_take_baseline(false, 0, 320));
+        assert!(ufc_take_baseline(false, 0, 330));
+        // Retry after a failed first search with the same number -> no restamp.
+        assert!(!ufc_take_baseline(false, 320, 320));
+        assert!(!ufc_take_baseline(false, 330, 330));
+        // Changing the selected number re-baselines once.
+        assert!(ufc_take_baseline(false, 320, 322));
+        assert!(ufc_take_baseline(false, 330, 320));
+        // Include-available on -> never stamp (backfill preserved).
+        assert!(!ufc_take_baseline(true, 0, 320));
+        assert!(!ufc_take_baseline(true, 320, 322));
+    }
+
+    #[test]
+    fn failed_first_search_does_not_move_the_watermark() {
+        // First check stamped ts for number 320 before the search failed.
+        let (number, ts) = (320u16, "2026-09-24T21:00:00Z");
+        // Retry with the same number must not restamp.
+        assert!(!ufc_take_baseline(false, number, 320));
+        // A replay published after the original watermark still qualifies...
+        assert!(numbered_replay_allowed(false, ts, "2026-09-24T21:05:00Z"));
+        // ...while one published before it is still skipped.
+        assert!(!numbered_replay_allowed(false, ts, "2026-09-24T20:59:59Z"));
+        // Changing the number re-baselines (new stamp) once.
+        assert!(ufc_take_baseline(false, number, 322));
     }
 
     #[test]

@@ -201,6 +201,35 @@
       </article>
 
       <article class="border round mod-config__content__section">
+        <h5>Follow full replays</h5>
+        <p>Check every 30 minutes for new full-length recordings. Downloads use your normal quality and destination settings. Only one automatic recording downloads at a time.</p>
+        <nav class="v-switch">
+          <div class="max"><h6>Automatically follow replays</h6></div>
+          <label class="switch"><input v-model="modConfig.data.autoFollowReplays" type="checkbox"><span></span></label>
+        </nav>
+        <div class="field label border round small">
+          <input v-model.number="modConfig.data.autoFollowUfcNumber" type="number" min="0" max="9999">
+          <label>Next numbered UFC event (0 disables UFC events)</label>
+        </div>
+        <div class="field label border round small">
+          <input v-model.number="modConfig.data.autoFollowBjjNumber" type="number" min="0" max="9999">
+          <label>Next UFC BJJ event (0 disables BJJ events)</label>
+        </div>
+        <nav class="v-switch">
+          <div class="max"><h6>Dana White's Contender Series</h6><div>Follow complete Season/Week episodes, not individual fights.</div></div>
+          <label class="switch"><input v-model="modConfig.data.autoFollowContenderSeries" type="checkbox"><span></span></label>
+        </nav>
+        <nav class="v-switch">
+          <div class="max"><h6>UFC Fight Nights</h6><div>Follow full main cards, prelims, and early prelims as they appear.</div></div>
+          <label class="switch"><input v-model="modConfig.data.autoFollowFightNights" type="checkbox"><span></span></label>
+        </nav>
+        <nav class="v-switch">
+          <div class="max"><h6>Include available replays on first check</h6><div>Otherwise existing recordings are marked as seen. When enabled, includes the selected UFC and BJJ events, the latest Contender Series episode, and the latest Fight Night.</div></div>
+          <label class="switch"><input v-model="modConfig.data.autoFollowExisting" type="checkbox"><span></span></label>
+        </nav>
+      </article>
+
+      <article class="border round mod-config__content__section">
         <h5>Previews (spoilers)</h5>
         <nav class="v-switch">
           <div class="max">

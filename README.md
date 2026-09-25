@@ -184,11 +184,6 @@ That's it.
 > You need to have a UFC Fight Pass account with a **paid subscription**, and to be logged into that account to use UFC
 > Ripper.
 
-> [!NOTE]
-> This build ships with **empty** `apiKey` and `searchAPIKey` values. Clean builds require you to supply valid UFC Fight
-> Pass application and search keys privately (via `config/config.json` or the configuration UI). Logging in with a Fight
-> Pass account does **not** supply these keys, and catalogue search and manifest requests will fail without them.
-
 1. Open up the GUI in the browser and go into Configuration (⚙️ button) and log in with your UFC Fight Pass account
    using the "Fight Pass account" section.
 
